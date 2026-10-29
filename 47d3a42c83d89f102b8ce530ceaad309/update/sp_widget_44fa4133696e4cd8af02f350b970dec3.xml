@@ -430,7 +430,6 @@
     data.readOnly = false;
     data.canWrite = false;
     data.searchResults = [];
-    data.debug = {};
 
     var tableName = options.table || '';
     var recordId = options.sys_id || '';
@@ -439,12 +438,9 @@
     data.readOnly = readOnly;
     data.tableName = tableName;
     data.recordId = recordId;
-    data.debug.tableName = tableName;
-    data.debug.recordId = recordId;
-    data.debug.readOnly = readOnly;
 
     if (!tableName || !recordId) {
-        data.error = 'Missing table or sys_id parameter. table=[' + tableName + '] sys_id=[' + recordId + ']';
+        data.error = 'Missing table or sys_id parameter.';
         return;
     }
 
@@ -475,14 +471,11 @@
         gr.setLimit(1);
         gr.query();
         if (!gr.next()) {
-            data.error = 'Record not found or no access. table=[' + tableName + '] sys_id=[' + recordId + ']';
-            data.debug.recordFound = false;
+            data.error = 'Record not found or no access.';
             return;
         }
 
-        data.debug.recordFound = true;
         data.canWrite = !readOnly && gr.canWrite();
-        data.debug.canWrite = data.canWrite;
 
         for (var i = 0; i < listFields.length; i++) {
             var cfg = listFields[i];
@@ -496,7 +489,6 @@
             };
 
             var rawValue = gr.getValue(cfg.field);
-            data.debug[cfg.field] = rawValue;
 
             if (rawValue && (rawValue + '').trim()) {
                 var ids = (rawValue + '').split(',');
@@ -517,8 +509,6 @@
 
             data.sections.push(section);
         }
-
-        data.debug.sectionCount = data.sections.length;
     }
 
     function resolveUser(sysId) {
@@ -671,10 +661,6 @@
             }
         }
 
-        data.debug.searchType = searchType;
-        data.debug.searchTerm = term;
-        data.debug.searchResultCount = data.searchResults.length;
-
         loadSections();
     }
 })();
@@ -704,10 +690,7 @@
     <p class="m-t-sm">${No list fields are available for this record.}</p>
   </div>
 
-  <!-- Debug info (temporary) -->
-  <div class="alert alert-info" ng-if="c.data.debug" style="font-size:11px; word-break:break-all;">
-    <strong>Debug:</strong> {{c.data.debug | json}}
-  </div>
+
 
   <!-- Loading indicator -->
   <div class="text-center m-t-sm m-b-sm" ng-if="c.loading">
