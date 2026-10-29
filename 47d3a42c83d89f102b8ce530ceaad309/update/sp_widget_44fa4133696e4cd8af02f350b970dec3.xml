@@ -430,6 +430,7 @@
     data.readOnly = false;
     data.canWrite = false;
     data.searchResults = [];
+    data.debug = {};
 
     var tableName = options.table || '';
     var recordId = options.sys_id || '';
@@ -438,12 +439,18 @@
     data.readOnly = readOnly;
     data.tableName = tableName;
     data.recordId = recordId;
+    data.debug.tableName = tableName;
+    data.debug.recordId = recordId;
+    data.debug.readOnly = readOnly;
 
     if (!tableName || !recordId) {
-        data.error = 'Missing table or sys_id parameter.';
+        data.error = 'Missing table or sys_id parameter. table=[' + tableName + '] sys_id=[' + recordId + ']';
         return;
     }
 
+    // These fields are defined on the task table, inherited by incident and sc_req_item.
+    // We skip field detection and always present all sections — the fields are guaranteed
+    // to exist on any task-based table used in Employee Center.
     var listFields = [
         { field: 'watch_list', label: 'Watch List', refTable: 'sys_user', type: 'user' },
         { field: 'work_notes_list', label: 'Work Notes List', refTable: 'sys_user', type: 'user' },
@@ -459,41 +466,6 @@
     // Initial load
     loadSections();
 
-    // Scope-safe field existence check via sys_dictionary + table hierarchy.
-    // GlideRecord.isValidField() returns false for inherited fields in scoped apps,
-    // so we query the dictionary directly across the full table hierarchy.
-    function getTableHierarchy(tbl) {
-        var tables = [];
-        var current = tbl + '';
-        while (current) {
-            tables.push(current);
-            var dbo = new GlideRecord('sys_db_object');
-            dbo.addQuery('name', current);
-            dbo.setLimit(1);
-            dbo.query();
-            if (dbo.next() && dbo.getValue('super_class')) {
-                var parent = new GlideRecord('sys_db_object');
-                parent.addQuery('sys_id', dbo.getValue('super_class'));
-                parent.setLimit(1);
-                parent.query();
-                if (parent.next()) {
-                    current = parent.getValue('name') || '';
-                } else { current = ''; }
-            } else { current = ''; }
-        }
-        return tables.join(',');
-    }
-
-    function fieldExistsOnTable(tbl, fieldName) {
-        var hierarchy = getTableHierarchy(tbl);
-        var dict = new GlideRecord('sys_dictionary');
-        dict.addQuery('element', fieldName);
-        dict.addQuery('name', 'IN', hierarchy);
-        dict.setLimit(1);
-        dict.query();
-        return dict.hasNext();
-    }
-
     function loadSections() {
         data.sections = [];
         data.canWrite = false;
@@ -503,17 +475,17 @@
         gr.setLimit(1);
         gr.query();
         if (!gr.next()) {
-            data.error = 'Record not found or no access.';
+            data.error = 'Record not found or no access. table=[' + tableName + '] sys_id=[' + recordId + ']';
+            data.debug.recordFound = false;
             return;
         }
 
+        data.debug.recordFound = true;
         data.canWrite = !readOnly && gr.canWrite();
+        data.debug.canWrite = data.canWrite;
 
         for (var i = 0; i < listFields.length; i++) {
             var cfg = listFields[i];
-            if (!fieldExistsOnTable(tableName, cfg.field)) {
-                continue;
-            }
 
             var section = {
                 field: cfg.field,
@@ -524,6 +496,8 @@
             };
 
             var rawValue = gr.getValue(cfg.field);
+            data.debug[cfg.field] = rawValue;
+
             if (rawValue && (rawValue + '').trim()) {
                 var ids = (rawValue + '').split(',');
                 for (var j = 0; j < ids.length; j++) {
@@ -543,6 +517,8 @@
 
             data.sections.push(section);
         }
+
+        data.debug.sectionCount = data.sections.length;
     }
 
     function resolveUser(sysId) {
@@ -695,6 +671,10 @@
             }
         }
 
+        data.debug.searchType = searchType;
+        data.debug.searchTerm = term;
+        data.debug.searchResultCount = data.searchResults.length;
+
         loadSections();
     }
 })();
@@ -722,6 +702,11 @@
   <div class="text-center text-muted" ng-if="!c.data.sections.length && !c.data.error">
     <i class="fa fa-info-circle fa-2x"></i>
     <p class="m-t-sm">${No list fields are available for this record.}</p>
+  </div>
+
+  <!-- Debug info (temporary) -->
+  <div class="alert alert-info" ng-if="c.data.debug" style="font-size:11px; word-break:break-all;">
+    <strong>Debug:</strong> {{c.data.debug | json}}
   </div>
 
   <!-- Loading indicator -->
