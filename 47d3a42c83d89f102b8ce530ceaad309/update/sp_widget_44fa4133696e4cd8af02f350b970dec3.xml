@@ -1,0 +1,830 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update table="sp_widget">
+    <sp_widget action="INSERT_OR_UPDATE">
+        <category>custom</category>
+        <client_script><![CDATA[api.controller = function ($timeout) {
+    var c = this;
+
+    c.selectedField = '';
+    c.searchTerm = '';
+    c.searchResults = [];
+    c.searching = false;
+    c.showDropdown = false;
+    c.loading = false;
+
+    // Cache sections from initial load so they survive server round-trips
+    c._cachedSections = [];
+
+    c.$onInit = function () {
+        if (c.data.sections && c.data.sections.length > 0) {
+            c.selectedField = c.data.sections[0].field;
+            c._cachedSections = c.data.sections;
+        }
+    };
+
+    // Ensure sections are never lost after a server call
+    function ensureSections() {
+        if (!c.data.sections || c.data.sections.length === 0) {
+            if (c._cachedSections && c._cachedSections.length > 0) {
+                c.data.sections = c._cachedSections;
+            }
+        } else {
+            c._cachedSections = c.data.sections;
+        }
+    }
+
+    c.getSelectedSection = function () {
+        if (!c.data.sections || !c.selectedField) { return null; }
+        for (var i = 0; i < c.data.sections.length; i++) {
+            if (c.data.sections[i].field === c.selectedField) {
+                return c.data.sections[i];
+            }
+        }
+        return null;
+    };
+
+    c.getSearchPlaceholder = function () {
+        var section = c.getSelectedSection();
+        if (!section) { return 'Search...'; }
+        return section.type === 'group' ? 'Search groups to add...' : 'Search users to add...';
+    };
+
+    c.onFieldChange = function () {
+        c.searchTerm = '';
+        c.searchResults = [];
+        c.showDropdown = false;
+    };
+
+    c.search = function () {
+        if (!c.searchTerm || c.searchTerm.length < 2) {
+            c.searchResults = [];
+            c.showDropdown = false;
+            return;
+        }
+
+        var section = c.getSelectedSection();
+        if (!section) { return; }
+
+        c.searching = true;
+
+        // Use c.server.update() which MERGES response into c.data
+        // (c.server.get() REPLACES c.data, wiping out sections)
+        c.data.action = 'search';
+        c.data.search_term = c.searchTerm;
+        c.data.search_type = section.type;
+
+        c.server.update().then(function () {
+            c.searching = false;
+            c.searchResults = c.data.searchResults || [];
+            c.showDropdown = c.searchResults.length > 0;
+            c.data.action = null;
+            ensureSections();
+        });
+    };
+
+    c.addMember = function (result) {
+        if (c.loading || !c.selectedField) { return; }
+        c.loading = true;
+        c.showDropdown = false;
+        c.searchTerm = '';
+        c.searchResults = [];
+
+        c.data.action = 'add_member';
+        c.data.field = c.selectedField;
+        c.data.member_id = result.sys_id;
+
+        c.server.update().then(function () {
+            c.loading = false;
+            c.data.action = null;
+            ensureSections();
+        });
+    };
+
+    c.removeMember = function (section, member) {
+        if (c.loading) { return; }
+        c.loading = true;
+
+        c.data.action = 'remove_member';
+        c.data.field = section.field;
+        c.data.member_id = member.sys_id;
+
+        c.server.update().then(function () {
+            c.loading = false;
+            c.data.action = null;
+            ensureSections();
+        });
+    };
+
+    c.hideDropdown = function () {
+        $timeout(function () {
+            c.showDropdown = false;
+        }, 200);
+    };
+
+    c.isAlreadyMember = function (memberId) {
+        var section = c.getSelectedSection();
+        if (!section || !section.members) { return false; }
+        for (var i = 0; i < section.members.length; i++) {
+            if (section.members[i].sys_id === memberId) { return true; }
+        }
+        return false;
+    };
+};
+]]></client_script>
+        <controller_as>c</controller_as>
+        <css>.list-manager-widget {
+    padding: 16px;
+    font-family: inherit;
+}
+
+/* Unified search area */
+.search-area {
+    background-color: #f8fafb;
+    border: 1px solid #e0e6ec;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.search-area-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    margin: 0 0 12px 0;
+    display: flex;
+    align-items: center;
+}
+
+.search-area-title &gt; .fa {
+    margin-right: 8px;
+    color: #4a90d9;
+    font-size: 14px;
+}
+
+.search-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.field-select-wrapper {
+    flex: 0 0 180px;
+}
+
+.field-select-wrapper select {
+    height: 34px;
+    font-size: 13px;
+}
+
+.search-input-wrapper {
+    flex: 1;
+    position: relative;
+}
+
+/* Section styles */
+.list-section {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #e8e8e8;
+}
+
+.list-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    margin: 0 0 10px 0;
+    display: flex;
+    align-items: center;
+}
+
+.section-title &gt; .fa {
+    margin-right: 8px;
+    color: #6c757d;
+    font-size: 13px;
+}
+
+.member-count {
+    background-color: #e8ecf0;
+    color: #555;
+    font-size: 11px;
+    font-weight: 500;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    vertical-align: middle;
+}
+
+.members-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 32px;
+    align-items: flex-start;
+}
+
+.member-pill {
+    display: inline-flex;
+    align-items: center;
+    background-color: #f0f4f8;
+    border: 1px solid #d0dbe6;
+    border-radius: 20px;
+    padding: 3px 10px 3px 3px;
+    font-size: 13px;
+    color: #333;
+    transition: background-color 0.15s ease;
+    max-width: 280px;
+}
+
+.member-pill:hover {
+    background-color: #e3ebf3;
+}
+
+.member-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    overflow: hidden;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+.avatar-initials {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background-color: #4a90d9;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+.avatar-initials.sm {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+}
+
+.group-initials {
+    background-color: #6c757d;
+}
+
+.member-name {
+    margin-right: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.btn-remove {
+    background: none;
+    border: none;
+    color: #999;
+    padding: 0 2px;
+    margin-left: 2px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.btn-remove:hover {
+    color: #d9534f;
+    background-color: rgba(217, 83, 79, 0.1);
+}
+
+.btn-remove:focus {
+    outline: 2px solid #4a90d9;
+    outline-offset: 1px;
+}
+
+.empty-message {
+    font-size: 13px;
+    padding: 4px 0;
+    font-style: italic;
+}
+
+/* Search input styles */
+.search-input-wrapper .input-group-addon {
+    background-color: #fff;
+    border-color: #ccc;
+    color: #888;
+}
+
+.search-input-wrapper .form-control:focus {
+    border-color: #4a90d9;
+    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
+}
+
+.search-dropdown {
+    display: block;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    max-height: 240px;
+    overflow-y: auto;
+    margin-top: 2px;
+    padding: 4px 0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    list-style: none;
+}
+
+.search-dropdown li {
+    list-style: none;
+}
+
+.search-dropdown li a,
+.search-dropdown li .disabled-result {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    color: #333;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+}
+
+.search-dropdown li a:hover,
+.search-dropdown li a:focus {
+    background-color: #f5f7fa;
+    text-decoration: none;
+    color: #333;
+}
+
+.search-dropdown li.already-added .disabled-result {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.search-dropdown li.no-results {
+    padding: 10px 12px;
+    text-align: center;
+}
+
+.result-avatar {
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
+.result-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+
+.result-name {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.result-email {
+    font-size: 12px;
+    color: #888;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    .search-row {
+        flex-direction: column;
+    }
+    .field-select-wrapper {
+        flex: none;
+        width: 100%;
+    }
+}</css>
+        <data_table>sp_instance</data_table>
+        <demo_data/>
+        <description>Manage watch_list, work_notes_list, and group_list fields on task-based records. Shows pill-style member tags with search/typeahead to add or remove users and groups.</description>
+        <docs/>
+        <field_list/>
+        <has_preview>false</has_preview>
+        <id>x_431699_ec_requ_0_list_manager</id>
+        <internal>false</internal>
+        <link><![CDATA[function link(scope, element, attrs, controller) {
+}]]></link>
+        <name>EC List Manager</name>
+        <option_schema/>
+        <public>false</public>
+        <roles/>
+        <script><![CDATA[(function () {
+    data.sections = [];
+    data.error = '';
+    data.readOnly = false;
+    data.canWrite = false;
+    data.searchResults = [];
+
+ //   var tableName = options.table || '';
+ //   var recordId = options.sys_id || '';
+
+// Initial load: use widget options or URL parameters.
+// Subsequent calls: also accept the context returned through c.data.
+var tableName = (
+    options.table ||
+    $sp.getParameter('table') ||
+    (input && input.tableName) ||
+    ''
+) + '';
+
+var recordId = (
+    options.sys_id ||
+    $sp.getParameter('sys_id') ||
+    (input && input.recordId) ||
+    ''
+) + '';
+
+    var readOnly = options.read_only === true || options.read_only === 'true';
+
+    data.readOnly = readOnly;
+    data.tableName = tableName;
+    data.recordId = recordId;
+
+    if (!tableName || !recordId) {
+        data.error = 'Missing table or sys_id parameter.';
+        return;
+    }
+
+    // These fields are defined on the task table, inherited by incident and sc_req_item.
+    // We skip field detection and always present all sections — the fields are guaranteed
+    // to exist on any task-based table used in Employee Center.
+    var listFields = [
+        { field: 'watch_list', label: 'Users', refTable: 'sys_user', type: 'user' },
+    //    { field: 'work_notes_list', label: 'Work Notes List', refTable: 'sys_user', type: 'user' },
+        { field: 'group_list', label: 'Groups', refTable: 'sys_user_group', type: 'group' }
+    ];
+
+    // Handle client actions
+    if (input && input.action) {
+        handleAction(input);
+        return;
+    }
+
+    // Initial load
+    loadSections();
+
+    function loadSections() {
+        data.sections = [];
+        data.canWrite = false;
+
+        var gr = new GlideRecord(tableName);
+        gr.addQuery('sys_id', recordId);
+        gr.setLimit(1);
+        gr.query();
+        if (!gr.next()) {
+            data.error = 'Record not found or no access.';
+            return;
+        }
+
+        data.canWrite = !readOnly && gr.canWrite();
+
+        for (var i = 0; i < listFields.length; i++) {
+            var cfg = listFields[i];
+
+            var section = {
+                field: cfg.field,
+                label: cfg.label,
+                type: cfg.type,
+                refTable: cfg.refTable,
+                members: []
+            };
+
+            var rawValue = gr.getValue(cfg.field);
+
+            if (rawValue && (rawValue + '').trim()) {
+                var ids = (rawValue + '').split(',');
+                for (var j = 0; j < ids.length; j++) {
+                    var id = (ids[j] + '').trim();
+                    if (!id) { continue; }
+                    var member;
+                    if (cfg.type === 'user') {
+                        member = resolveUser(id);
+                    } else {
+                        member = resolveGroup(id);
+                    }
+                    if (member) {
+                        section.members.push(member);
+                    }
+                }
+            }
+
+            data.sections.push(section);
+        }
+    }
+
+    function resolveUser(sysId) {
+        var u = new GlideRecord('sys_user');
+        u.addQuery('sys_id', sysId);
+        u.setLimit(1);
+        u.query();
+        if (u.next()) {
+            var name = u.getValue('name') || '';
+            return {
+                sys_id: u.getUniqueValue(),
+                name: name,
+                email: u.getValue('email') || '',
+                initials: buildInitials(name)
+            };
+        }
+        return null;
+    }
+
+    function resolveGroup(sysId) {
+        var g = new GlideRecord('sys_user_group');
+        g.addQuery('sys_id', sysId);
+        g.setLimit(1);
+        g.query();
+        if (g.next()) {
+            var name = g.getValue('name') || '';
+            return {
+                sys_id: g.getUniqueValue(),
+                name: name,
+                initials: buildInitials(name)
+            };
+        }
+        return null;
+    }
+
+    function buildInitials(name) {
+        if (!name) { return '?'; }
+        var parts = name.split(' ');
+        if (parts.length >= 2) {
+            return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+        }
+        return name.substring(0, 2).toUpperCase();
+    }
+
+    function handleAction(req) {
+        var action = req.action;
+
+        if (action === 'search') {
+            doSearch(req);
+            return;
+        }
+
+        if (readOnly) {
+            data.error = 'This record is read-only.';
+            loadSections();
+            return;
+        }
+
+        var gr = new GlideRecord(tableName);
+        gr.addQuery('sys_id', recordId);
+        gr.setLimit(1);
+        gr.query();
+        if (!gr.next()) {
+            data.error = 'Record not found.';
+            loadSections();
+            return;
+        }
+
+        if (!gr.canWrite()) {
+            data.error = 'You do not have permission to update this record.';
+            loadSections();
+            return;
+        }
+
+        var field = req.field;
+        var memberId = req.member_id;
+
+        if (!field || !memberId) {
+            data.error = 'Invalid parameters.';
+            loadSections();
+            return;
+        }
+
+        if (action === 'add_member') {
+            var curVal = gr.getValue(field) || '';
+            var curIds = curVal ? (curVal + '').split(',') : [];
+            var clean = [];
+            for (var a = 0; a < curIds.length; a++) {
+                var t = (curIds[a] + '').trim();
+                if (t) { clean.push(t); }
+            }
+            if (clean.indexOf(memberId) === -1) {
+                clean.push(memberId);
+                gr.setValue(field, clean.join(','));
+                gr.update();
+            }
+        } else if (action === 'remove_member') {
+            var curVal2 = gr.getValue(field) || '';
+            var ids2 = curVal2 ? (curVal2 + '').split(',') : [];
+            var newIds = [];
+            for (var b = 0; b < ids2.length; b++) {
+                var t2 = (ids2[b] + '').trim();
+                if (t2 && t2 !== memberId) {
+                    newIds.push(t2);
+                }
+            }
+            gr.setValue(field, newIds.join(','));
+            gr.update();
+        }
+
+        loadSections();
+    }
+
+    function doSearch(req) {
+        var term = (req.search_term || '') + '';
+        var searchType = req.search_type || 'user';
+        data.searchResults = [];
+
+        if (term.length < 2) {
+            loadSections();
+            return;
+        }
+
+        if (searchType === 'user') {
+            var su = new GlideRecord('sys_user');
+            su.addEncodedQuery('active=true^nameCONTAINS' + term + '^ORuser_nameCONTAINS' + term + '^ORemailCONTAINS' + term);
+            su.setLimit(10);
+            su.orderBy('name');
+            su.query();
+            while (su.next()) {
+                data.searchResults.push({
+                    sys_id: su.getUniqueValue(),
+                    name: su.getValue('name') || '',
+                    email: su.getValue('email') || '',
+                    initials: buildInitials(su.getValue('name') || '')
+                });
+            }
+        } else if (searchType === 'group') {
+            var sg = new GlideRecord('sys_user_group');
+            sg.addEncodedQuery('active=true^nameCONTAINS' + term);
+            sg.setLimit(10);
+            sg.orderBy('name');
+            sg.query();
+            while (sg.next()) {
+                data.searchResults.push({
+                    sys_id: sg.getUniqueValue(),
+                    name: sg.getValue('name') || '',
+                    initials: buildInitials(sg.getValue('name') || '')
+                });
+            }
+        }
+
+        loadSections();
+    }
+})();
+]]></script>
+        <servicenow>false</servicenow>
+        <sys_class_name>sp_widget</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2026-10-29 11:42:25</sys_created_on>
+        <sys_id>44fa4133696e4cd8af02f350b970dec3</sys_id>
+        <sys_mod_count>6</sys_mod_count>
+        <sys_name>EC List Manager</sys_name>
+        <sys_package display_value="EC Request List Manager" source="x_431699_ec_requ_0">47d3a42c83d89f102b8ce530ceaad309</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="EC Request List Manager">47d3a42c83d89f102b8ce530ceaad309</sys_scope>
+        <sys_update_name>sp_widget_44fa4133696e4cd8af02f350b970dec3</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2026-10-29 13:06:07</sys_updated_on>
+        <template><![CDATA[<div class="list-manager-widget">
+  <!-- Error message -->
+  <div class="alert alert-danger" ng-if="c.data.error">
+    <i class="fa fa-exclamation-circle"></i> {{c.data.error}}
+  </div>
+
+  <!-- No sections available -->
+  <div class="text-center text-muted" ng-if="!c.data.sections.length && !c.data.error">
+    <i class="fa fa-info-circle fa-2x"></i>
+    <p class="m-t-sm">${No list fields are available for this record.}</p>
+  </div>
+
+
+
+  <!-- Loading indicator -->
+  <div class="text-center m-t-sm m-b-sm" ng-if="c.loading">
+    <i class="fa fa-spinner fa-spin"></i> ${Updating}&hellip;
+  </div>
+
+  <!-- Unified search area (only when editable) -->
+  <div class="search-area" ng-if="c.data.canWrite && c.data.sections.length > 0">
+    <h4 class="search-area-title">
+      <i class="fa fa-plus-circle"></i> ${Add users or groups that should receive updates from the ticket}
+    </h4>
+    <div class="search-row">
+      <div class="field-select-wrapper">
+        <label class="sr-only" for="targetField">${Target list}</label>
+        <select id="targetField" class="form-control"
+                ng-model="c.selectedField"
+                ng-change="c.onFieldChange()">
+          <option ng-repeat="s in c.data.sections track by s.field"
+                  value="{{s.field}}">{{s.label}}</option>
+        </select>
+      </div>
+      <div class="search-input-wrapper">
+        <label class="sr-only" for="searchInput">${Search to add}</label>
+        <div class="input-group">
+          <span class="input-group-addon">
+            <i class="fa fa-search"></i>
+          </span>
+          <input type="text" class="form-control" id="searchInput"
+                 ng-model="c.searchTerm"
+                 ng-change="c.search()"
+                 ng-blur="c.hideDropdown()"
+                 placeholder="{{c.getSearchPlaceholder()}}"
+                 autocomplete="off" />
+          <span class="input-group-addon" ng-if="c.searching">
+            <i class="fa fa-spinner fa-spin"></i>
+          </span>
+        </div>
+
+        <!-- Dropdown results -->
+        <ul class="dropdown-menu search-dropdown"
+            ng-show="c.showDropdown"
+            role="listbox"
+            aria-label="${Search results}">
+          <li ng-repeat="result in c.searchResults track by result.sys_id"
+              ng-class="{'already-added': c.isAlreadyMember(result.sys_id)}"
+              role="option">
+            <a href="javascript:void(0)"
+               ng-click="c.addMember(result)"
+               ng-if="!c.isAlreadyMember(result.sys_id)">
+              <span class="result-avatar">
+                <span class="avatar-initials sm">{{result.initials}}</span>
+              </span>
+              <span class="result-info">
+                <span class="result-name">{{result.name}}</span>
+                <span class="result-email" ng-if="result.email">{{result.email}}</span>
+              </span>
+            </a>
+            <span class="disabled-result" ng-if="c.isAlreadyMember(result.sys_id)">
+              <span class="result-avatar">
+                <span class="avatar-initials sm">{{result.initials}}</span>
+              </span>
+              <span class="result-info">
+                <span class="result-name">{{result.name}}</span>
+                <small class="text-muted">(${already added})</small>
+              </span>
+            </span>
+          </li>
+          <li ng-if="!c.searchResults.length" class="no-results">
+            <span class="text-muted">${No results found.}</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sections showing current members -->
+  <div class="list-section" ng-repeat="section in c.data.sections track by section.field">
+    <h4 class="section-title">
+      <i class="fa" ng-class="{'fa-users': section.type === 'user', 'fa-group': section.type === 'group'}"></i>
+      {{section.label}}
+      <span class="badge member-count">{{section.members.length}}</span>
+    </h4>
+
+    <!-- Current members as pills -->
+    <div class="members-container">
+      <span class="member-pill" ng-repeat="member in section.members track by member.sys_id">
+        <span class="member-avatar" ng-class="{'group-avatar': section.type === 'group'}">
+          <span class="avatar-initials" ng-class="{'group-initials': section.type === 'group'}">{{member.initials}}</span>
+        </span>
+        <span class="member-name" title="{{member.name}}">{{member.name}}</span>
+        <button type="button" class="btn-remove" ng-if="c.data.canWrite"
+                ng-click="c.removeMember(section, member)"
+                ng-disabled="c.loading"
+                aria-label="Remove {{member.name}} from {{section.label}}">
+          <i class="fa fa-times"></i>
+        </button>
+      </span>
+
+      <div class="text-muted empty-message" ng-if="!section.members.length">
+        ${No members added yet.}
+      </div>
+    </div>
+  </div>
+</div>
+]]></template>
+    </sp_widget>
+</record_update>
