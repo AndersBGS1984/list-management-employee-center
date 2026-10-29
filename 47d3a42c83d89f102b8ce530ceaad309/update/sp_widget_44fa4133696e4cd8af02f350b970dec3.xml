@@ -11,12 +11,26 @@
     c.showDropdown = false;
     c.loading = false;
 
-    // Set default selection to first available section
+    // Cache sections from initial load so they survive server round-trips
+    c._cachedSections = [];
+
     c.$onInit = function () {
         if (c.data.sections && c.data.sections.length > 0) {
             c.selectedField = c.data.sections[0].field;
+            c._cachedSections = c.data.sections;
         }
     };
+
+    // Ensure sections are never lost after a server call
+    function ensureSections() {
+        if (!c.data.sections || c.data.sections.length === 0) {
+            if (c._cachedSections && c._cachedSections.length > 0) {
+                c.data.sections = c._cachedSections;
+            }
+        } else {
+            c._cachedSections = c.data.sections;
+        }
+    }
 
     c.getSelectedSection = function () {
         if (!c.data.sections || !c.selectedField) { return null; }
@@ -51,22 +65,19 @@
         if (!section) { return; }
 
         c.searching = true;
-        c.server.get({
-            action: 'search',
-            search_term: c.searchTerm,
-            search_type: section.type
-        }).then(function (response) {
+
+        // Use c.server.update() which MERGES response into c.data
+        // (c.server.get() REPLACES c.data, wiping out sections)
+        c.data.action = 'search';
+        c.data.search_term = c.searchTerm;
+        c.data.search_type = section.type;
+
+        c.server.update().then(function () {
             c.searching = false;
-            c.searchResults = response.data.searchResults || [];
+            c.searchResults = c.data.searchResults || [];
             c.showDropdown = c.searchResults.length > 0;
-            // Sync sections from response
-            if (response.data.sections) {
-                c.data.sections = response.data.sections;
-            }
-            // Re-apply selected field default if needed
-            if (!c.selectedField && c.data.sections && c.data.sections.length > 0) {
-                c.selectedField = c.data.sections[0].field;
-            }
+            c.data.action = null;
+            ensureSections();
         });
     };
 
@@ -84,6 +95,7 @@
         c.server.update().then(function () {
             c.loading = false;
             c.data.action = null;
+            ensureSections();
         });
     };
 
@@ -98,6 +110,7 @@
         c.server.update().then(function () {
             c.loading = false;
             c.data.action = null;
+            ensureSections();
         });
     };
 
