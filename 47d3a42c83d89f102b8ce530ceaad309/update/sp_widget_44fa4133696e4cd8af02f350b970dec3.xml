@@ -409,8 +409,7 @@
         flex: none;
         width: 100%;
     }
-}
-</css>
+}</css>
         <data_table>sp_instance</data_table>
         <demo_data/>
         <description>Manage watch_list, work_notes_list, and group_list fields on task-based records. Shows pill-style member tags with search/typeahead to add or remove users and groups.</description>
@@ -460,6 +459,41 @@
     // Initial load
     loadSections();
 
+    // Scope-safe field existence check via sys_dictionary + table hierarchy.
+    // GlideRecord.isValidField() returns false for inherited fields in scoped apps,
+    // so we query the dictionary directly across the full table hierarchy.
+    function getTableHierarchy(tbl) {
+        var tables = [];
+        var current = tbl + '';
+        while (current) {
+            tables.push(current);
+            var dbo = new GlideRecord('sys_db_object');
+            dbo.addQuery('name', current);
+            dbo.setLimit(1);
+            dbo.query();
+            if (dbo.next() && dbo.getValue('super_class')) {
+                var parent = new GlideRecord('sys_db_object');
+                parent.addQuery('sys_id', dbo.getValue('super_class'));
+                parent.setLimit(1);
+                parent.query();
+                if (parent.next()) {
+                    current = parent.getValue('name') || '';
+                } else { current = ''; }
+            } else { current = ''; }
+        }
+        return tables.join(',');
+    }
+
+    function fieldExistsOnTable(tbl, fieldName) {
+        var hierarchy = getTableHierarchy(tbl);
+        var dict = new GlideRecord('sys_dictionary');
+        dict.addQuery('element', fieldName);
+        dict.addQuery('name', 'IN', hierarchy);
+        dict.setLimit(1);
+        dict.query();
+        return dict.hasNext();
+    }
+
     function loadSections() {
         data.sections = [];
         data.canWrite = false;
@@ -477,7 +511,7 @@
 
         for (var i = 0; i < listFields.length; i++) {
             var cfg = listFields[i];
-            if (!gr.isValidField(cfg.field)) {
+            if (!fieldExistsOnTable(tableName, cfg.field)) {
                 continue;
             }
 
@@ -586,7 +620,7 @@
         var field = req.field;
         var memberId = req.member_id;
 
-        if (!field || !memberId || !gr.isValidField(field)) {
+        if (!field || !memberId) {
             data.error = 'Invalid parameters.';
             loadSections();
             return;
